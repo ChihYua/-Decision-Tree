@@ -1,0 +1,642 @@
+<html><head><base href="https://multi-decision-tree-voting.example.com/">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>多棵決策樹投票預測系統</title>
+<style>
+    body {
+        font-family: Arial, sans-serif;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        height: 100vh;
+    }
+    #input-section {
+        flex: 1;
+        padding: 20px;
+        background-color: #f0f0f0;
+        overflow-y: auto;
+    }
+    #output-section {
+        flex: 2;
+        padding: 20px;
+        background-color: #ffffff;
+        overflow: auto;
+        position: relative;
+    }
+    h1, h2 {
+        color: #333;
+    }
+    input, select, button {
+        margin: 10px 0;
+        padding: 5px;
+        width: 100%;
+    }
+    .range-inputs {
+        display: flex;
+        justify-content: space-between;
+    }
+    .range-inputs input {
+        width: 45%;
+    }
+    #trees-container {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+    }
+    .tree {
+        width: 100%;
+        height: 500px;
+        margin-bottom: 20px;
+        border: 1px solid #ddd;
+        border-radius: 5px;
+        display: flex;
+        justify-content: flex-start;
+        align-items: flex-start;
+        overflow: hidden;
+        position: relative;
+    }
+    .tree-svg-container {
+        width: calc(100% - 20px);
+        height: calc(100% - 20px);
+        overflow: auto;
+    }
+    #vote-container {
+        text-align: center;
+        margin-top: 20px;
+        padding: 10px;
+        background-color: #e6f7ff;
+        border-radius: 5px;
+    }
+    #prediction-container {
+        text-align: center;
+        margin-top: 20px;
+        padding: 10px;
+        background-color: #e6ffe6;
+        border-radius: 5px;
+        font-weight: bold;
+    }
+    .node circle {
+        fill: #fff;
+        stroke: #4CAF50;
+        stroke-width: 2px;
+    }
+    .node text {
+        font: 12px sans-serif;
+    }
+    .link {
+        fill: none;
+        stroke: #ccc;
+        stroke-width: 1px;
+    }
+    .selected-path {
+        stroke-width: 3px;
+    }
+    #current-conditions {
+        background-color: #fff;
+        border: 1px solid #ddd;
+        border-radius: 5px;
+        padding: 10px;
+        margin-top: 20px;
+    }
+    #current-conditions h2 {
+        margin-top: 0;
+    }
+    .current-condition {
+        margin-bottom: 10px;
+    }
+    #tree-selector {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        z-index: 1000;
+    }
+    #tree-selector select {
+        width: auto;
+        padding: 5px;
+    }
+    .scrollbar {
+        position: absolute;
+        background-color: #f0f0f0;
+        border-radius: 5px;
+    }
+    .scrollbar:hover {
+        background-color: #d0d0d0;
+    }
+    .horizontal-scrollbar {
+        bottom: 0;
+        left: 0;
+        right: 20px;
+        height: 20px;
+    }
+    .vertical-scrollbar {
+        top: 0;
+        right: 0;
+        bottom: 20px;
+        width: 20px;
+    }
+    .scrollbar-thumb {
+        position: absolute;
+        background-color: #888;
+        border-radius: 5px;
+        cursor: pointer;
+    }
+    .scrollbar-thumb:hover {
+        background-color: #555;
+    }
+</style>
+<script src="https://d3js.org/d3.v5.min.js"></script>
+</head>
+<body>
+    <div id="input-section">
+        <h1>多棵決策樹投票預測系統</h1>
+        <div>
+            <h2>預測目標</h2>
+            <input type="text" id="target" placeholder="輸入預測目標（例如：是否購買）">
+        </div>
+        <div>
+            <h2>決策條件</h2>
+            <div id="conditions">
+                <div class="condition">
+                    <input type="text" placeholder="條件名稱" class="condition-name">
+                    <select class="condition-type" onchange="updateConditionInputs(this)">
+                        <option value="numeric">數值</option>
+                        <option value="categorical">類別</option>
+                    </select>
+                    <div class="condition-inputs">
+                        <div class="range-inputs">
+                            <input type="number" placeholder="最小值" class="min-value">
+                            <input type="number" placeholder="最大值" class="max-value">
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <button onclick="addCondition()">新增條件</button>
+        </div>
+        <div>
+            <h2>決策樹數量</h2>
+            <input type="number" id="tree-count" value="3" min="1" max="10">
+        </div>
+        <button onclick="generateTrees()">生成決策樹</button>
+        <button onclick="resetConditions()">重新輸入條件</button>
+        
+        <div id="current-conditions">
+            <h2>現況輸入</h2>
+            <div id="current-inputs"></div>
+            <button onclick="updatePrediction()">更新預測</button>
+        </div>
+    </div>
+    <div id="output-section">
+        <div id="tree-selector">
+            <select id="tree-select" onchange="showSelectedTree()">
+                <option value="all">顯示所有樹</option>
+            </select>
+        </div>
+        <div id="trees-container"></div>
+        <div id="vote-container"></div>
+        <div id="prediction-container"></div>
+    </div>
+
+<script>
+let treeData = [];
+const colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8', '#C71585', '#20B2AA', '#FF8C00', '#4169E1', '#2E8B57'];
+
+function updateConditionInputs(selectElement) {
+    const conditionDiv = selectElement.closest('.condition');
+    const inputsDiv = conditionDiv.querySelector('.condition-inputs');
+    if (selectElement.value === 'numeric') {
+        inputsDiv.innerHTML = `
+            <div class="range-inputs">
+                <input type="number" placeholder="最小值" class="min-value">
+                <input type="number" placeholder="最大值" class="max-value">
+            </div>
+        `;
+    } else {
+        inputsDiv.innerHTML = `
+            <input type="text" placeholder="可能的值（用逗號分隔）" class="condition-values">
+        `;
+    }
+    updateCurrentInputs();
+}
+
+function addCondition() {
+    const conditionsDiv = document.getElementById('conditions');
+    const newCondition = document.createElement('div');
+    newCondition.className = 'condition';
+    newCondition.innerHTML = `
+        <input type="text" placeholder="條件名稱" class="condition-name">
+        <select class="condition-type" onchange="updateConditionInputs(this)">
+            <option value="numeric">數值</option>
+            <option value="categorical">類別</option>
+        </select>
+        <div class="condition-inputs">
+            <div class="range-inputs">
+                <input type="number" placeholder="最小值" class="min-value">
+                <input type="number" placeholder="最大值" class="max-value">
+            </div>
+        </div>
+    `;
+    conditionsDiv.appendChild(newCondition);
+    updateCurrentInputs();
+}
+
+function generateTrees() {
+    const target = document.getElementById('target').value;
+    const conditions = document.querySelectorAll('#conditions > .condition');
+    const treeCount = Math.min(parseInt(document.getElementById('tree-count').value), 10);
+    
+    treeData = [];
+    
+    for (let i = 0; i < treeCount; i++) {
+        let tree = {
+            name: "Input",
+            children: []
+        };
+        
+        function addNode(parent, depth) {
+            if (depth >= conditions.length) {
+                parent.children.push({
+                    name: Math.random() < 0.5 ? "Yes" : "No",
+                    isResult: true
+                });
+                return;
+            }
+            
+            const condition = conditions[depth];
+            const name = condition.querySelector('.condition-name').value;
+            const type = condition.querySelector('.condition-type').value;
+            
+            const node = {
+                name: name,
+                children: []
+            };
+            parent.children.push(node);
+            
+            if (type === 'numeric') {
+                const minValue = condition.querySelector('.min-value').value;
+                const maxValue = condition.querySelector('.max-value').value;
+                const midValue = (parseFloat(minValue) + parseFloat(maxValue)) / 2;
+                
+                const lowNode = {
+                    name: `< ${midValue}`,
+                    children: []
+                };
+                const highNode = {
+                    name: `≥ ${midValue}`,
+                    children: []
+                };
+                
+                node.children.push(lowNode, highNode);
+                addNode(lowNode, depth + 1);
+                addNode(highNode, depth + 1);
+            } else {
+                const values = condition.querySelector('.condition-values').value.split(',');
+                values.forEach(value => {
+                    const childNode = {
+                        name: value.trim(),
+                        children: []
+                    };
+                    node.children.push(childNode);
+                    addNode(childNode, depth + 1);
+                });
+            }
+        }
+        
+        addNode(tree, 0);
+        treeData.push(tree);
+    }
+    
+    updateTreeSelector();
+    updateTrees();
+    updateCurrentInputs();
+}
+
+function resetConditions() {
+    document.getElementById('target').value = '';
+    document.getElementById('conditions').innerHTML = `
+        <div class="condition">
+            <input type="text" placeholder="條件名稱" class="condition-name">
+            <select class="condition-type" onchange="updateConditionInputs(this)">
+                <option value="numeric">數值</option>
+                <option value="categorical">類別</option>
+            </select>
+            <div class="condition-inputs">
+                <div class="range-inputs">
+                    <input type="number" placeholder="最小值" class="min-value">
+                    <input type="number" placeholder="最大值" class="max-value">
+                </div>
+            </div>
+        </div>
+    `;
+    document.getElementById('tree-count').value = '3';
+    treeData = [];
+    updateTreeSelector();
+    updateTrees();
+    updateCurrentInputs();
+}
+
+function updateTrees() {
+    const treesContainer = document.getElementById('trees-container');
+    treesContainer.innerHTML = '';
+    
+    const selectedTreeIndex = document.getElementById('tree-select').value;
+    const treesToShow = selectedTreeIndex === 'all' ? treeData : [treeData[selectedTreeIndex]];
+    
+    treesToShow.forEach((data, index) => {
+        const treeDiv = document.createElement('div');
+        treeDiv.className = 'tree';
+        treeDiv.id = `tree-${index}`;
+        treesContainer.appendChild(treeDiv);
+        
+        const svgContainer = document.createElement('div');
+        svgContainer.className = 'tree-svg-container';
+        treeDiv.appendChild(svgContainer);
+
+        const horizontalScrollbar = document.createElement('div');
+        horizontalScrollbar.className = 'scrollbar horizontal-scrollbar';
+        treeDiv.appendChild(horizontalScrollbar);
+
+        const verticalScrollbar = document.createElement('div');
+        verticalScrollbar.className = 'scrollbar vertical-scrollbar';
+        treeDiv.appendChild(verticalScrollbar);
+        
+        const width = 2000; // Increased width to accommodate larger trees
+        const height = 1000; // Increased height to accommodate larger trees
+        
+        const svg = d3.select(svgContainer)
+            .append("svg")
+            .attr("width", width)
+            .attr("height", height)
+            .append("g")
+            .attr("transform", `translate(20,20)`);
+        
+        const treeLayout = d3.tree().size([height - 40, width - 200]);
+        const root = d3.hierarchy(data);
+        treeLayout(root);
+        
+        const link = svg.selectAll(".link")
+            .data(root.links())
+            .enter().append("path")
+            .attr("class", "link")
+            .attr("d", d3.linkHorizontal()
+                .x(d => d.y)
+                .y(d => d.x));
+        
+        const node = svg.selectAll(".node")
+            .data(root.descendants())
+            .enter().append("g")
+            .attr("class", d => "node" + (d.children ? " node--internal" : " node--leaf"))
+            .attr("transform", d => `translate(${d.y},${d.x})`);
+        
+        node.append("circle")
+            .attr("r", 4);
+        
+        node.append("text")
+            .attr("dy", ".31em")
+            .attr("x", d => d.children ? -8 : 8)
+            .style("text-anchor", d => d.children ? "end" : "start")
+            .text(d => d.data.name);
+
+        // Find and color the selected path
+        const selectedPath = findSelectedPath(root);
+        selectedPath.forEach((d, i) => {
+            if (i < selectedPath.length - 1) {
+                svg.append("path")
+                    .attr("class", "link selected-path")
+                    .attr("d", d3.linkHorizontal()
+                        .x(l => l.y)
+                        .y(l => l.x)({
+                            source: d,
+                            target: selectedPath[i + 1]
+                        }))
+                    .style("stroke", colors[index % colors.length]);
+            }
+        });
+
+        // Add scrollbars
+        addScrollbars(svgContainer, horizontalScrollbar, verticalScrollbar);
+    });
+    
+    updateVoteAndPrediction();
+}
+
+function addScrollbars(container, horizontalScrollbar, verticalScrollbar) {
+    const content = container.firstChild;
+    const containerWidth = container.clientWidth;
+    const containerHeight = container.clientHeight;
+    const contentWidth = content.scrollWidth;
+    const contentHeight = content.scrollHeight;
+
+    if (contentWidth > containerWidth) {
+        const thumbWidth = (containerWidth / contentWidth) * containerWidth;
+        const horizontalThumb = document.createElement('div');
+        horizontalThumb.className = 'scrollbar-thumb';
+        horizontalThumb.style.width = `${thumbWidth}px`;
+        horizontalScrollbar.appendChild(horizontalThumb);
+
+        horizontalScrollbar.addEventListener('mousedown', (e) => {
+            const startX = e.clientX;
+            const startScrollLeft = container.scrollLeft;
+            const maxScroll = contentWidth - containerWidth;
+
+            function onMouseMove(e) {
+                const dx = e.clientX - startX;
+                const scrollRatio = dx / (containerWidth - thumbWidth);
+                container.scrollLeft = Math.min(Math.max(0, startScrollLeft + scrollRatio * maxScroll), maxScroll);
+                updateThumbPosition(horizontalThumb, container.scrollLeft / maxScroll, 'horizontal');
+            }
+
+            function onMouseUp() {
+                document.removeEventListener('mousemove', onMouseMove);
+                document.removeEventListener('mouseup', onMouseUp);
+            }
+
+            document.addEventListener('mousemove', onMouseMove);
+            document.addEventListener('mouseup', onMouseUp);
+        });
+    }
+
+    if (contentHeight > containerHeight) {
+        const thumbHeight = (containerHeight / contentHeight) * containerHeight;
+        const verticalThumb = document.createElement('div');
+        verticalThumb.className = 'scrollbar-thumb';
+        verticalThumb.style.height = `${thumbHeight}px`;
+        verticalScrollbar.appendChild(verticalThumb);
+
+        verticalScrollbar.addEventListener('mousedown', (e) => {
+            const startY = e.clientY;
+            const startScrollTop = container.scrollTop;
+            const maxScroll = contentHeight - containerHeight;
+
+            function onMouseMove(e) {
+                const dy = e.clientY - startY;
+                const scrollRatio = dy / (containerHeight - thumbHeight);
+                container.scrollTop = Math.min(Math.max(0, startScrollTop + scrollRatio * maxScroll), maxScroll);
+                updateThumbPosition(verticalThumb, container.scrollTop / maxScroll, 'vertical');
+            }
+
+            function onMouseUp() {
+                document.removeEventListener('mousemove', onMouseMove);
+                document.removeEventListener('mouseup', onMouseUp);
+            }
+
+            document.addEventListener('mousemove', onMouseMove);
+            document.addEventListener('mouseup', onMouseUp);
+        });
+    }
+
+    container.addEventListener('scroll', () => {
+        if (contentWidth > containerWidth) {
+            updateThumbPosition(horizontalScrollbar.firstChild, container.scrollLeft / (contentWidth - containerWidth), 'horizontal');
+        }
+        if (contentHeight > containerHeight) {
+            updateThumbPosition(verticalScrollbar.firstChild, container.scrollTop / (contentHeight - containerHeight), 'vertical');
+        }
+    });
+}
+
+function updateThumbPosition(thumb, scrollRatio, direction) {
+    if (direction === 'horizontal') {
+        thumb.style.left = `${scrollRatio * (thumb.parentNode.clientWidth - thumb.clientWidth)}px`;
+    } else {
+        thumb.style.top = `${scrollRatio * (thumb.parentNode.clientHeight - thumb.clientHeight)}px`;
+    }
+}
+
+function findSelectedPath(root) {
+    let path = [root];
+    let current = root;
+    while (current.children) {
+        current = current.children[Math.floor(Math.random() * current.children.length)];
+        path.push(current);
+    }
+    return path;
+}
+
+function updateVoteAndPrediction() {
+    const voteContainer = document.getElementById('vote-container');
+    const predictionContainer = document.getElementById('prediction-container');
+    
+    let yesVotes = 0;
+    let noVotes = 0;
+    
+    treeData.forEach(tree => {
+        const result = findResult(tree);
+        if (result === 'Yes') yesVotes++;
+        else noVotes++;
+    });
+    
+    voteContainer.innerHTML = `<h2>投票結果</h2>Yes: ${yesVotes}, No: ${noVotes}`;
+    
+    const prediction = yesVotes > noVotes ? 'Yes' : 'No';
+    predictionContainer.innerHTML = `<h2>最終預測結果</h2>${prediction} (n=${treeData.length})`;
+}
+
+function findResult(node) {
+    if (node.isResult) return node.name;
+    if (node.children) {
+        for (let child of node.children) {
+            const result = findResult(child);
+            if (result) return result;
+        }
+    }
+    return null;
+}
+
+function updateCurrentInputs() {
+    const currentInputsDiv = document.getElementById('current-inputs');
+    currentInputsDiv.innerHTML = '';
+    const conditions = document.querySelectorAll('#conditions > .condition');
+    
+    conditions.forEach((condition, index) => {
+        const name = condition.querySelector('.condition-name').value;
+        const type = condition.querySelector('.condition-type').value;
+        
+        const currentCondition = document.createElement('div');
+        currentCondition.className = 'current-condition';
+        currentCondition.innerHTML = `<label>${name}: </label>`;
+        
+        if (type === 'numeric') {
+            currentCondition.innerHTML += `<input type="number" id="current-${index}" class="current-input">`;
+        } else {
+            const values = condition.querySelector('.condition-values').value.split(',');
+            currentCondition.innerHTML += `
+                <select id="current-${index}" class="current-input">
+                    ${values.map(value => `<option value="${value.trim()}">${value.trim()}</option>`).join('')}
+                </select>
+            `;
+        }
+        
+        currentInputsDiv.appendChild(currentCondition);
+    });
+}
+
+function updatePrediction() {
+    const currentInputs = document.querySelectorAll('.current-input');
+    const inputValues = Array.from(currentInputs).map(input => input.value);
+    
+    let yesVotes = 0;
+    let noVotes = 0;
+    
+    treeData.forEach(tree => {
+        const result = traverseTree(tree, inputValues);
+        if (result === 'Yes') yesVotes++;
+        else noVotes++;
+    });
+    
+    const voteContainer = document.getElementById('vote-container');
+    const predictionContainer = document.getElementById('prediction-container');
+    
+    voteContainer.innerHTML = `<h2>投票結果</h2>Yes: ${yesVotes}, No: ${noVotes}`;
+    
+    const prediction = yesVotes > noVotes ? 'Yes' : 'No';
+    predictionContainer.innerHTML = `<h2>最終預測結果</h2>${prediction} (n=${treeData.length})`;
+    
+    updateTrees();
+}
+
+function traverseTree(node, inputValues) {
+    if (node.isResult) return node.name;
+    if (node.children) {
+        const condition = node.name;
+        const inputValue = inputValues[getConditionIndex(condition)];
+        const nextNode = node.children.find(child => {
+            if (child.name.includes('<') || child.name.includes('≥')) {
+                const threshold = parseFloat(child.name.replace(/[<≥]/g, ''));
+                return (child.name.includes('<') && parseFloat(inputValue) < threshold) ||
+                       (child.name.includes('≥') && parseFloat(inputValue) >= threshold);
+            } else {
+                return child.name === inputValue;
+            }
+        });
+        if (nextNode) {
+            return traverseTree(nextNode, inputValues);
+        }
+    }
+    return null;
+}
+
+function getConditionIndex(conditionName) {
+    const conditions = document.querySelectorAll('#conditions > .condition');
+    return Array.from(conditions).findIndex(condition => 
+        condition.querySelector('.condition-name').value === conditionName
+    );
+}
+
+function updateTreeSelector() {
+    const treeSelect = document.getElementById('tree-select');
+    treeSelect.innerHTML = '<option value="all">顯示所有樹</option>';
+    treeData.forEach((_, index) => {
+        treeSelect.innerHTML += `<option value="${index}">決策樹 ${index + 1}</option>`;
+    });
+}
+
+function showSelectedTree() {
+    updateTrees();
+}
+
+// 初始化
+addCondition();
+updateCurrentInputs();
+updateTreeSelector();
+</script>
+</body></html>
